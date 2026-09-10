@@ -1,0 +1,187 @@
+{
+  "format": "isx",
+  "schemaVersion": "1.0",
+  "meta": {
+    "id": "kiosk-demo",
+    "name": "Product Kiosk Demo",
+    "description": "Reference document showing every major schema feature.",
+    "author": "Inspiration Technologies",
+    "appVersion": "0.1.0"
+  },
+  "stage": {
+    "width": 1280,
+    "height": 720,
+    "orientation": "landscape",
+    "background": "#0b0f14",
+    "scaleMode": "fit"
+  },
+  "variables": [
+    { "id": "count", "name": "Tap count", "type": "number", "initial": 0 },
+    { "id": "products", "name": "Product list", "type": "array", "initial": [] },
+    { "id": "detailsOpen", "name": "Details visible", "type": "boolean", "initial": false }
+  ],
+  "dataSources": [
+    {
+      "id": "catalog",
+      "name": "Product catalog API",
+      "kind": "rest",
+      "uri": "https://api.example.com/products",
+      "mode": "read",
+      "sync": { "live": true, "intervalMs": 30000 },
+      "auth": { "type": "oauth2", "vaultKey": "catalog_oauth", "scopes": ["catalog.read"] }
+    },
+    {
+      "id": "local",
+      "name": "Local inventory",
+      "kind": "sqlite",
+      "uri": "./data/inventory.db",
+      "mode": "readwrite",
+      "sync": { "live": true }
+    }
+  ],
+  "assets": [
+    { "id": "hero", "kind": "image", "uri": "./assets/hero.jpg", "hash": "sha256-abc123", "bytes": 184320 }
+  ],
+  "hardware": [
+    {
+      "id": "scanner",
+      "name": "RFID tag reader",
+      "channel": "nfc",
+      "config": { "reader": "PCSC" },
+      "emits": "tagScanned",
+      "enabled": true
+    },
+    {
+      "id": "iot",
+      "name": "Local IoT bridge",
+      "channel": "websocket",
+      "config": { "port": 8080 },
+      "emits": "iotMessage"
+    }
+  ],
+  "entryScreen": "home",
+  "screens": [
+    {
+      "id": "home",
+      "name": "Home",
+      "background": "#0b0f14",
+      "events": [
+        {
+          "on": "load",
+          "do": [
+            { "type": "data.query", "source": "catalog", "into": "products" }
+          ]
+        },
+        {
+          "on": "device",
+          "binding": "scanner",
+          "do": [
+            { "type": "showMessage", "message": { "expr": "'Scanned tag: ' + event.tagId" } },
+            { "type": "navigate", "screen": "details", "transition": "slideOver", "durationMs": 300 }
+          ]
+        }
+      ],
+      "elements": [
+        {
+          "id": "backdrop",
+          "type": "shape",
+          "name": "Backdrop panel",
+          "layout": {
+            "x": 80, "y": 90, "width": 1120, "height": 540, "z": 0,
+            "anchors": { "left": 80, "right": 80, "top": 90, "bottom": 90 }
+          },
+          "props": { "kind": "rectangle", "fill": "#0f1720", "stroke": "#20303f", "strokeWidth": 1, "radius": 24 }
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "name": "Title",
+          "layout": { "x": 140, "y": 150, "width": 620, "height": 80, "z": 1 },
+          "props": { "text": "Product Kiosk", "size": 56, "color": "#e6edf3", "weight": 800, "align": "left" }
+        },
+        {
+          "id": "counter",
+          "type": "text",
+          "name": "Live counter",
+          "layout": { "x": 140, "y": 240, "width": 620, "height": 40, "z": 1 },
+          "props": { "text": "Taps: 0", "size": 26, "color": "#8ba0b3", "weight": 500, "align": "left" },
+          "bindings": { "text": "'Taps: ' + count" }
+        },
+        {
+          "id": "revealBtn",
+          "type": "button",
+          "name": "Reveal button",
+          "layout": {
+            "x": 140, "y": 430, "width": 260, "height": 84, "z": 2,
+            "anchors": { "left": 140, "bottom": 90 }
+          },
+          "props": { "label": "Reveal details", "bg": "#22d3ee", "color": "#04121a", "size": 24, "radius": 14 },
+          "events": [
+            {
+              "on": "tap",
+              "do": [
+                { "type": "setVariable", "variable": "count", "to": { "expr": "count + 1" } },
+                { "type": "toggleVisibility", "target": "detailsPanel", "to": "toggle" },
+                { "type": "setVariable", "variable": "detailsOpen", "to": { "expr": "!detailsOpen" } }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "detailsPanel",
+          "type": "container",
+          "name": "Details panel",
+          "visible": false,
+          "layout": {
+            "x": 760, "y": 210, "width": 380, "height": 300, "z": 2,
+            "anchors": { "right": 140, "top": 210 }
+          },
+          "props": { "fill": "#122431" },
+          "children": [
+            {
+              "id": "detailsText",
+              "type": "text",
+              "name": "Details copy",
+              "layout": { "x": 24, "y": 24, "width": 332, "height": 252 },
+              "props": { "text": "Details panel content", "size": 22, "color": "#cfe9ec", "weight": 500, "align": "left" }
+            }
+          ]
+        },
+        {
+          "id": "productGrid",
+          "type": "dataList",
+          "name": "Product grid",
+          "layout": { "x": 140, "y": 540, "width": 1000, "height": 60, "z": 1 },
+          "props": { "source": "products", "direction": "horizontal", "gap": 16, "itemTemplate": "detailsPanel" }
+        },
+        {
+          "id": "clock",
+          "type": "text",
+          "name": "Clock",
+          "layout": { "x": 980, "y": 150, "width": 160, "height": 40, "z": 1, "anchors": { "right": 140, "top": 150 } },
+          "props": { "text": "--:--", "size": 22, "color": "#5b7183", "align": "right" },
+          "events": [
+            { "on": "timer", "intervalMs": 1000, "do": [ { "type": "script", "source": "self.text = new Date().toLocaleTimeString()" } ] }
+          ],
+          "script": { "language": "javascript", "source": "// tier-2 override available to this element" }
+        }
+      ]
+    },
+    {
+      "id": "details",
+      "name": "Details",
+      "elements": [
+        {
+          "id": "backBtn",
+          "type": "button",
+          "name": "Back",
+          "layout": { "x": 60, "y": 60, "width": 160, "height": 64 },
+          "props": { "label": "Back", "bg": "#182531", "color": "#e6edf3", "size": 20, "radius": 10 },
+          "events": [
+            { "on": "tap", "do": [ { "type": "navigate", "screen": "home", "transition": "slidePush" } ] }
+          ]
+        }
+      ]
+    }
+  ]
+}

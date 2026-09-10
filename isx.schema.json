@@ -1,0 +1,793 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inspirationtech.dev/schema/isx/1.0/isx.schema.json",
+  "title": "Inspiration Studio Experience (.isx) v1.1",
+  "description": "Canonical serialization for an Inspiration Studio project. v1.1 adds container states (Static/Free/Pinnable), an expanded move/resize/rotate/z-order/opacity/effects action set, and visibility/inactivity/manipulation/drop-target triggers. Fully additive over v1.0 — existing v1.0 documents remain valid. Authored by the Studio, consumed unchanged by both the interpreted Player runtime and the standalone compiler.",
+  "type": "object",
+  "required": ["format", "schemaVersion", "meta", "stage", "screens", "entryScreen"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": "isx", "description": "File-format discriminator. Always \"isx\"." },
+    "schemaVersion": { "$ref": "#/$defs/semver", "description": "Version of THIS schema the document targets." },
+    "meta": { "$ref": "#/$defs/meta" },
+    "stage": { "$ref": "#/$defs/stage" },
+    "variables": { "type": "array", "items": { "$ref": "#/$defs/variable" }, "description": "App-wide reactive state. Elements bind to these; actions mutate them." },
+    "dataSources": { "type": "array", "items": { "$ref": "#/$defs/dataSource" } },
+    "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
+    "hardware": { "type": "array", "items": { "$ref": "#/$defs/hardwareBinding" }, "description": "Device channels that dispatch events into the logic engine." },
+    "remoteEndpoints": { "type": "array", "items": { "$ref": "#/$defs/remoteEndpoint" }, "description": "Other Player instances this document can send remote actions to." },
+    "screens": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/screen" } },
+    "entryScreen": { "type": "string", "description": "id of the screen shown on launch. Must match a screens[].id." }
+  },
+
+  "$defs": {
+    "semver": { "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "description": "Stable identifier, unique within its collection." },
+    "expression": {
+      "type": "object",
+      "description": "A value that is either a literal or a bound/computed reference. Exactly one of `value` or `expr` is present.",
+      "additionalProperties": false,
+      "properties": {
+        "value": { "description": "A literal JSON value." },
+        "expr": { "type": "string", "description": "Sandboxed expression evaluated against app scope (variables, data, event). e.g. \"count + 1\" or \"data.products.length\"." }
+      },
+      "oneOf": [ { "required": ["value"] }, { "required": ["expr"] } ]
+    },
+
+    "meta": {
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "author": { "type": "string" },
+        "created": { "type": "string", "format": "date-time" },
+        "modified": { "type": "string", "format": "date-time" },
+        "appVersion": { "$ref": "#/$defs/semver", "description": "Version of the AUTHORED app, set by the creator (distinct from schemaVersion)." }
+      }
+    },
+
+    "stage": {
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "number", "exclusiveMinimum": 0, "description": "Design-space width in logical units. All element coordinates are in this space." },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "orientation": { "enum": ["landscape", "portrait"], "default": "landscape" },
+        "background": { "$ref": "#/$defs/color", "default": "#000000" },
+        "scaleMode": {
+          "enum": ["fit", "fill", "stretch", "none"],
+          "default": "fit",
+          "description": "How the design-space stage maps onto the physical viewport at runtime. `fit` letterboxes, `fill` crops, `stretch` distorts, `none` pins to top-left."
+        }
+      }
+    },
+
+    "color": { "type": "string", "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$", "description": "#RRGGBB or #RRGGBBAA." },
+
+    "variable": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "type": { "enum": ["string", "number", "boolean", "object", "array"] },
+        "initial": { "description": "Starting value; should match `type`." },
+        "persist": { "type": "boolean", "default": false, "description": "If true, the runtime writes this to the local workspace and restores it on next launch." }
+      }
+    },
+
+    "dataSource": {
+      "type": "object",
+      "required": ["id", "kind", "uri"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "kind": { "enum": ["sqlite", "csv", "excel", "json", "rest"] },
+        "uri": { "type": "string", "description": "Local path or URL. Relative paths resolve against the project workspace." },
+        "mode": { "enum": ["read", "readwrite"], "default": "read" },
+        "sync": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "live": { "type": "boolean", "default": false, "description": "Watch the source and re-render bound elements on change (the Reactive Data Layer)." },
+            "intervalMs": { "type": "integer", "minimum": 0, "description": "Poll interval for sources that cannot push (e.g. rest). Omit for filesystem watchers." }
+          }
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "type": { "enum": ["none", "apiKey", "bearer", "oauth2"], "default": "none" },
+            "vaultKey": { "type": "string", "description": "Reference into the local system credential vault. Secrets are never stored inline." },
+            "scopes": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+
+    "asset": {
+      "type": "object",
+      "required": ["id", "kind", "uri"],
+      "additionalProperties": false,
+      "description": "An asset the project owns. When `data` is present, the asset is EMBEDDED — its bytes travel inside the .isx document itself and the runtime never touches the filesystem/network for it, making the document fully self-contained and portable. `uri` is then purely informational (original filename/extension). When `data` is absent, `uri` is an external reference the runtime fetches/reads at load time.",
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["image", "video", "audio", "pdf", "font", "file"] },
+        "uri": { "type": "string", "description": "Original filename or an external URI, depending on whether `data` is present." },
+        "mimeType": { "type": "string", "description": "e.g. image/png, video/mp4, application/pdf. Required when `data` is present, to build a data: URI." },
+        "data": { "type": "string", "description": "Base64-encoded content. Presence of this field is what makes the asset embedded/self-contained." },
+        "hash": { "type": "string", "description": "Content hash for cache-busting and integrity on over-the-air updates." },
+        "bytes": { "type": "integer", "minimum": 0 }
+      },
+      "allOf": [
+        { "if": { "required": ["data"] }, "then": { "required": ["mimeType"] } }
+      ]
+    },
+
+    "hardwareBinding": {
+      "type": "object",
+      "required": ["id", "channel", "emits"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "channel": { "enum": ["serial", "hid", "tuio", "websocket", "nfc", "keyboard"], "description": "Maps to the Omni-Channel Hardware Engine dispatchers." },
+        "config": { "type": "object", "additionalProperties": true, "description": "Channel-specific settings, e.g. { port, baudRate } for serial; { port } for websocket." },
+        "emits": { "type": "string", "description": "Name of the device event raised into the logic engine; referenced by an Event with on:\"device\"." },
+        "enabled": { "type": "boolean", "default": true }
+      }
+    },
+
+    "remoteEndpoint": {
+      "type": "object",
+      "required": ["id", "host", "port"],
+      "additionalProperties": false,
+      "description": "A named reference to another running Player instance on the network. Referenced by id from the remote.send action — the sending Player never needs to know the target's document, only its address and which of ITS OWN elements/screens the remote action addresses.",
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "host": { "type": "string", "description": "Hostname or IP of the remote Player." },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "The remote Player's remote-control listening port." }
+      }
+    },
+
+    "screen": {
+      "type": "object",
+      "required": ["id", "elements"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "background": { "$ref": "#/$defs/color" },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/element" } },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/event" }, "description": "Screen-level events, e.g. on:\"load\"." }
+      }
+    },
+
+    "layout": {
+      "type": "object",
+      "required": ["x", "y", "width", "height"],
+      "additionalProperties": false,
+      "description": "Hybrid Canvas Core: an absolute base rect in design space, refined by responsive anchors and sizing rules.",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 },
+        "z": { "type": "integer", "default": 0 },
+        "rotation": { "type": "number", "default": 0 },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "anchors": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Edge constraints relative to the parent. A number pins that edge at a fixed design-unit gap; true pins at the authored gap; absent lets the edge float.",
+          "properties": {
+            "left":    { "type": ["number", "boolean"] },
+            "right":   { "type": ["number", "boolean"] },
+            "top":     { "type": ["number", "boolean"] },
+            "bottom":  { "type": ["number", "boolean"] },
+            "centerX": { "type": "boolean" },
+            "centerY": { "type": "boolean" }
+          }
+        },
+        "sizing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "width":  { "enum": ["fixed", "fill", "percent", "aspect"], "default": "fixed" },
+            "height": { "enum": ["fixed", "fill", "percent", "aspect"], "default": "fixed" },
+            "widthPercent":  { "type": "number", "minimum": 0, "maximum": 100 },
+            "heightPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+            "aspectRatio":   { "type": "number", "exclusiveMinimum": 0, "description": "width / height, used when either dimension is sized \"aspect\"." }
+          }
+        }
+      }
+    },
+
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Runtime manipulation behavior. 'static' (default) elements cannot be moved by the user. 'free' elements can be dragged/resized/rotated at runtime. 'pinnable' elements can be toggled between free and static by the user.",
+      "properties": {
+        "mode": { "enum": ["static", "free", "pinnable"], "default": "static" },
+        "visibleToInteractivity": { "type": "boolean", "default": true, "description": "Static-only: if false, touches pass through to whatever is beneath this element." },
+        "allowMove": { "type": "boolean", "default": true },
+        "moveDirection": { "enum": ["any", "horizontal", "vertical"], "default": "any" },
+        "allowResize": { "type": "boolean", "default": true },
+        "allowRotate": { "type": "boolean", "default": true },
+        "minWidth": { "type": "number", "minimum": 0 },
+        "minHeight": { "type": "number", "minimum": 0 },
+        "maxWidth": { "type": "number", "minimum": 0 },
+        "maxHeight": { "type": "number", "minimum": 0 },
+        "initialState": { "enum": ["normal", "minimized", "maximized"], "default": "normal" },
+        "showMaximizeButton": { "type": "boolean", "default": false },
+        "showMinimizeButton": { "type": "boolean", "default": false },
+        "showCloseButton": { "type": "boolean", "default": false }
+      }
+    },
+
+    "effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Runtime-mutable visual filters, matched 1:1 to the applyEffects action's parameters.",
+      "properties": {
+        "blur": { "type": "number", "minimum": 0, "maximum": 100, "default": 0 },
+        "grayscale": { "type": "number", "minimum": 0, "maximum": 100, "default": 0 },
+        "sepia": { "type": "number", "minimum": 0, "maximum": 100, "default": 0 },
+        "hueRotation": { "type": "number", "default": 0 },
+        "brightness": { "type": "number", "minimum": 0, "default": 100 }
+      }
+    },
+
+    "element": {
+      "type": "object",
+      "required": ["id", "type", "layout"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["container", "text", "image", "video", "pdf", "button", "shape", "input", "webframe", "dataList"] },
+        "name": { "type": "string" },
+        "layout": { "$ref": "#/$defs/layout" },
+        "visible": { "type": "boolean", "default": true },
+        "container": { "$ref": "#/$defs/container" },
+        "effects": { "$ref": "#/$defs/effects" },
+        "bindings": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Map of prop-name -> expression. A bound prop re-evaluates when its dependencies change. e.g. { \"text\": \"'Items: ' + data.products.length\" }."
+        },
+        "props": { "type": "object", "additionalProperties": true },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/element" }, "description": "Only meaningful for `container` and `dataList`." },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/event" } },
+        "script": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["language", "source"],
+          "description": "Tier-2 logic: sandboxed override running in the isolated JS engine.",
+          "properties": {
+            "language": { "const": "javascript" },
+            "source": { "type": "string" }
+          }
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "text" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_text" } } } },
+        { "if": { "properties": { "type": { "const": "button" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_button" } } } },
+        { "if": { "properties": { "type": { "const": "image" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_image" } } } },
+        { "if": { "properties": { "type": { "const": "shape" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_shape" } } } },
+        { "if": { "properties": { "type": { "const": "input" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_input" } } } },
+        { "if": { "properties": { "type": { "const": "video" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_video" } } } },
+        { "if": { "properties": { "type": { "const": "pdf" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_pdf" } } } },
+        { "if": { "properties": { "type": { "const": "webframe" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_webframe" } } } },
+        { "if": { "properties": { "type": { "const": "dataList" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_dataList" } } } },
+        { "if": { "properties": { "type": { "const": "container" } } },
+          "then": { "properties": { "props": { "$ref": "#/$defs/props_container" } } } }
+      ]
+    },
+
+    "props_container": {
+      "type": "object", "additionalProperties": true,
+      "description": "Collections in Inspiration Studio are containers with a layout algorithm. `arrange: free` (default) positions children by their own authored layout — this is Intuiface's Group/Pinboard. `grid` lays children into a wrapping grid (Asset Grid). `carousel` shows exactly one child at a time with paging (Carousel). `swap` is a carousel with a selectable transition style — fade, slide, or flip (Intuiface's Swap). `slideshow` is like carousel but auto-advances on a timer with an optional Ken Burns pan/zoom effect (Intuiface's Ken Burns/Slide Show). `picker` shows the focused item centered with neighbors peeking on each side in a scrollable strip (Intuiface's Item Picker). `map` positions children by normalized (0-1) coordinates over a background image, with pan/zoom (Intuiface's Map, using an authored image rather than live map tiles). `timeline` positions children along a horizontal axis by date (Intuiface's Timeline). Indexed/positional arrangements (grid/carousel/swap/slideshow/picker/map/timeline) give their children `movedIntoFocus`/`movedOutOfFocus` triggers.",
+      "properties": {
+        "fill": { "$ref": "#/$defs/color" },
+        "arrange": { "enum": ["free", "grid", "carousel", "map", "timeline", "slideshow", "swap", "picker"], "default": "free" },
+        "transitionStyle": { "enum": ["fade", "slide", "flip"], "default": "fade", "description": "swap only: the visual effect used when moving between items." },
+        "itemWidth": { "type": "number", "exclusiveMinimum": 0, "description": "picker only: width of each item in the scrollable strip." },
+        "itemHeight": { "type": "number", "exclusiveMinimum": 0, "description": "picker only: height of each item in the scrollable strip." },
+        "slideDurationMs": { "type": "integer", "minimum": 100, "default": 5000, "description": "slideshow only: how long each slide shows before auto-advancing." },
+        "kenBurns": { "type": "boolean", "default": true, "description": "slideshow only: applies a slow pan/zoom to each slide while it's shown." },
+        "transition": { "enum": ["fade", "none"], "default": "fade", "description": "slideshow only: how slides change." },
+        "columns": { "type": "integer", "minimum": 1, "description": "grid only." },
+        "gap": { "type": "number", "minimum": 0, "default": 0 },
+        "loop": { "type": "boolean", "default": false, "description": "carousel only: wraps next()/previous() past the ends." },
+        "mapImageAssetId": { "type": "string", "description": "map only: the background image asset (a floor plan, world map, campus map, etc.)." },
+        "mapImageUri": { "type": "string", "description": "map only: external background image URL, used when mapImageAssetId isn't set." },
+        "mapMinZoom": { "type": "number", "exclusiveMinimum": 0, "default": 0.5 },
+        "mapMaxZoom": { "type": "number", "exclusiveMinimum": 0, "default": 4 },
+        "timelineStart": { "type": "string", "description": "timeline only: ISO date string for the left edge of the visible window. Omit to auto-fit around the children's own dates." },
+        "timelineEnd": { "type": "string", "description": "timeline only: ISO date string for the right edge of the visible window." }
+      }
+    },
+
+    "props_text": {
+      "type": "object", "additionalProperties": true,
+      "properties": {
+        "text": { "type": "string" },
+        "size": { "type": "number", "exclusiveMinimum": 0 },
+        "color": { "$ref": "#/$defs/color" },
+        "weight": { "type": "integer", "enum": [100,200,300,400,500,600,700,800,900] },
+        "align": { "enum": ["left", "center", "right"] },
+        "lineHeight": { "type": "number" }
+      }
+    },
+    "props_button": {
+      "type": "object", "additionalProperties": true,
+      "properties": {
+        "label": { "type": "string" },
+        "bg": { "$ref": "#/$defs/color" },
+        "color": { "$ref": "#/$defs/color" },
+        "size": { "type": "number", "exclusiveMinimum": 0 },
+        "radius": { "type": "number", "minimum": 0 }
+      }
+    },
+    "props_image": {
+      "type": "object", "additionalProperties": true,
+      "properties": {
+        "assetId": { "type": "string" },
+        "uri": { "type": "string" },
+        "fit": { "enum": ["cover", "contain", "fill"] },
+        "radius": { "type": "number", "minimum": 0 }
+      }
+    },
+    "props_shape": {
+      "type": "object", "additionalProperties": true,
+      "properties": {
+        "kind": { "enum": ["rectangle", "ellipse", "line"], "default": "rectangle" },
+        "fill": { "$ref": "#/$defs/color" },
+        "stroke": { "$ref": "#/$defs/color" },
+        "strokeWidth": { "type": "number", "minimum": 0 },
+        "radius": { "type": "number", "minimum": 0 }
+      }
+    },
+    "props_input": {
+      "type": "object", "additionalProperties": true,
+      "properties": {
+        "mode": { "enum": ["text", "number", "email", "password", "multiline"], "default": "text" },
+        "placeholder": { "type": "string" },
+        "bind": { "type": "string", "description": "Variable id this field reads/writes (two-way)." }
+      }
+    },
+    "props_video": {
+      "type": "object", "additionalProperties": true,
+      "properties": {
+        "assetId": { "type": "string" },
+        "uri": { "type": "string" },
+        "autoplay": { "type": "boolean" },
+        "loop": { "type": "boolean" },
+        "muted": { "type": "boolean" },
+        "controls": { "type": "boolean" }
+      }
+    },
+    "props_pdf": {
+      "type": "object", "additionalProperties": true,
+      "properties": {
+        "assetId": { "type": "string" },
+        "uri": { "type": "string" }
+      }
+    },
+    "props_webframe": {
+      "type": "object", "additionalProperties": true,
+      "properties": {
+        "uri": { "type": "string" },
+        "interactive": { "type": "boolean", "default": true }
+      }
+    },
+    "props_dataList": {
+      "type": "object", "additionalProperties": true,
+      "required": ["source"],
+      "properties": {
+        "source": { "type": "string", "description": "dataSource id, or a variable holding an array." },
+        "itemTemplate": { "type": "string", "description": "id of a container element used as the row template." },
+        "direction": { "enum": ["vertical", "horizontal", "grid"], "default": "vertical" },
+        "gap": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "trigger": {
+      "enum": [
+        "tap", "doubleTap", "longPress", "load", "unload", "valueChange", "timer", "data", "device", "dragStart", "dragEnd", "drop",
+        "isShown", "isHidden",
+        "hasBeenInactive", "userActivityDetected",
+        "startsToBeManipulated", "isManipulated",
+        "isMaximized", "isMinimized", "isUnmaximized", "isUnminimized",
+        "movedIntoFocus", "movedOutOfFocus",
+        "isDroppedOn", "isDraggedOver", "isDraggedAwayFrom",
+        "swipe", "pinch", "rotate"
+      ]
+    },
+
+    "event": {
+      "type": "object",
+      "required": ["on", "do"],
+      "additionalProperties": false,
+      "properties": {
+        "on": { "$ref": "#/$defs/trigger" },
+        "when": { "type": "string", "description": "Optional guard expression; the actions run only if it evaluates truthy." },
+        "intervalMs": { "type": "integer", "minimum": 1, "description": "Required when on = \"timer\"." },
+        "repeatIndefinitely": { "type": "boolean", "default": true, "description": "For timer/hasBeenInactive: keep re-arming after each firing." },
+        "runCount": { "type": "integer", "minimum": 1, "description": "For timer: fire exactly this many times instead of repeating indefinitely." },
+        "durationMs": { "type": "integer", "minimum": 0, "description": "Required for hasBeenInactive (idle duration) and userActivityDetected (delay before arming)." },
+        "binding": { "type": "string", "description": "hardwareBinding id, required when on = \"device\"." },
+        "source": { "type": "string", "description": "dataSource id, required when on = \"data\"." },
+        "target": { "type": "string", "description": "element id, required when on = \"isDroppedOn\" | \"isDraggedOver\" | \"isDraggedAwayFrom\" — the zone to test overlap against." },
+        "direction": { "enum": ["left", "right", "up", "down", "any"], "default": "any", "description": "For on = \"swipe\": only fires for this direction. \"any\" (default) fires for every swipe; event.direction always tells you which way it went." },
+        "do": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/action" } }
+      },
+      "allOf": [
+        { "if": { "properties": { "on": { "const": "timer" } } }, "then": { "required": ["intervalMs"] } },
+        { "if": { "properties": { "on": { "const": "device" } } }, "then": { "required": ["binding"] } },
+        { "if": { "properties": { "on": { "const": "data" } } }, "then": { "required": ["source"] } },
+        { "if": { "properties": { "on": { "const": "hasBeenInactive" } } }, "then": { "required": ["durationMs"] } },
+        { "if": { "properties": { "on": { "const": "userActivityDetected" } } }, "then": { "required": ["durationMs"] } },
+        { "if": { "properties": { "on": { "const": "isDroppedOn" } } }, "then": { "required": ["target"] } },
+        { "if": { "properties": { "on": { "const": "isDraggedOver" } } }, "then": { "required": ["target"] } },
+        { "if": { "properties": { "on": { "const": "isDraggedAwayFrom" } } }, "then": { "required": ["target"] } }
+      ]
+    },
+
+    "action": {
+      "type": "object",
+      "required": ["type"],
+      "oneOf": [
+        { "$ref": "#/$defs/action_navigate" },
+        { "$ref": "#/$defs/action_setVariable" },
+        { "$ref": "#/$defs/action_setProperty" },
+        { "$ref": "#/$defs/action_toggleVisibility" },
+        { "$ref": "#/$defs/action_showMessage" },
+        { "$ref": "#/$defs/action_media" },
+        { "$ref": "#/$defs/action_dataQuery" },
+        { "$ref": "#/$defs/action_dataWrite" },
+        { "$ref": "#/$defs/action_http" },
+        { "$ref": "#/$defs/action_deviceSend" },
+        { "$ref": "#/$defs/action_delay" },
+        { "$ref": "#/$defs/action_if" },
+        { "$ref": "#/$defs/action_script" },
+        { "$ref": "#/$defs/action_moveTo" },
+        { "$ref": "#/$defs/action_moveBy" },
+        { "$ref": "#/$defs/action_resizeToFactor" },
+        { "$ref": "#/$defs/action_resizeByFactor" },
+        { "$ref": "#/$defs/action_setSize" },
+        { "$ref": "#/$defs/action_rotateTo" },
+        { "$ref": "#/$defs/action_rotateBy" },
+        { "$ref": "#/$defs/action_bringToFront" },
+        { "$ref": "#/$defs/action_sendToBack" },
+        { "$ref": "#/$defs/action_setOpacity" },
+        { "$ref": "#/$defs/action_applyEffects" },
+        { "$ref": "#/$defs/action_containerState" },
+        { "$ref": "#/$defs/action_setInteractivity" },
+        { "$ref": "#/$defs/action_showAtLocation" },
+        { "$ref": "#/$defs/action_scrollToIndex" },
+        { "$ref": "#/$defs/action_collectionNext" },
+        { "$ref": "#/$defs/action_collectionPrevious" },
+        { "$ref": "#/$defs/action_remoteSend" },
+        { "$ref": "#/$defs/action_panMap" },
+        { "$ref": "#/$defs/action_zoomMap" },
+        { "$ref": "#/$defs/action_scrollToDate" },
+        { "$ref": "#/$defs/action_pauseSlideshow" },
+        { "$ref": "#/$defs/action_resumeSlideshow" }
+      ]
+    },
+
+    "action_navigate": {
+      "type": "object", "additionalProperties": false, "required": ["type", "screen"],
+      "properties": {
+        "type": { "const": "navigate" },
+        "screen": { "type": "string" },
+        "transition": { "enum": ["none", "fade", "slidePush", "slideOver", "zoom"], "default": "none" },
+        "durationMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "action_setVariable": {
+      "type": "object", "additionalProperties": false, "required": ["type", "variable", "to"],
+      "properties": {
+        "type": { "const": "setVariable" },
+        "variable": { "type": "string" },
+        "to": { "$ref": "#/$defs/expression" }
+      }
+    },
+    "action_setProperty": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target", "property", "to"],
+      "properties": {
+        "type": { "const": "setProperty" },
+        "target": { "type": "string", "description": "element id" },
+        "property": { "type": "string" },
+        "to": { "$ref": "#/$defs/expression" }
+      }
+    },
+    "action_toggleVisibility": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target"],
+      "properties": {
+        "type": { "const": "toggleVisibility" },
+        "target": { "type": "string" },
+        "to": { "enum": ["show", "hide", "toggle"], "default": "toggle" }
+      }
+    },
+    "action_showMessage": {
+      "type": "object", "additionalProperties": false, "required": ["type", "message"],
+      "properties": {
+        "type": { "const": "showMessage" },
+        "message": { "$ref": "#/$defs/expression" },
+        "durationMs": { "type": "integer", "minimum": 0, "default": 1800 }
+      }
+    },
+    "action_media": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target", "op"],
+      "properties": {
+        "type": { "const": "media" },
+        "target": { "type": "string" },
+        "op": { "enum": ["play", "pause", "stop", "toggle"] }
+      }
+    },
+    "action_dataQuery": {
+      "type": "object", "additionalProperties": false, "required": ["type", "source", "into"],
+      "properties": {
+        "type": { "const": "data.query" },
+        "source": { "type": "string" },
+        "query": { "type": "string", "description": "Source-specific query, e.g. SQL for sqlite. Omit to fetch the whole source." },
+        "params": { "type": "object", "additionalProperties": true },
+        "into": { "type": "string", "description": "variable id to receive the result" }
+      }
+    },
+    "action_dataWrite": {
+      "type": "object", "additionalProperties": false, "required": ["type", "source"],
+      "properties": {
+        "type": { "const": "data.write" },
+        "source": { "type": "string" },
+        "op": { "enum": ["insert", "update", "delete", "upsert"], "default": "upsert" },
+        "record": { "type": "object", "additionalProperties": true },
+        "where": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "action_http": {
+      "type": "object", "additionalProperties": false, "required": ["type", "url"],
+      "properties": {
+        "type": { "const": "http.request" },
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"], "default": "GET" },
+        "url": { "type": "string" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "body": {},
+        "authSource": { "type": "string", "description": "dataSource id whose auth/vault credentials to attach." },
+        "into": { "type": "string", "description": "variable id to receive the parsed response" }
+      }
+    },
+    "action_deviceSend": {
+      "type": "object", "additionalProperties": false, "required": ["type", "binding", "payload"],
+      "properties": {
+        "type": { "const": "device.send" },
+        "binding": { "type": "string", "description": "hardwareBinding id to write to (serial/websocket)." },
+        "payload": { "$ref": "#/$defs/expression" }
+      }
+    },
+    "action_delay": {
+      "type": "object", "additionalProperties": false, "required": ["type", "ms"],
+      "properties": {
+        "type": { "const": "delay" },
+        "ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "action_if": {
+      "type": "object", "additionalProperties": false, "required": ["type", "when", "then"],
+      "properties": {
+        "type": { "const": "if" },
+        "when": { "type": "string", "description": "Condition expression." },
+        "then": { "type": "array", "items": { "$ref": "#/$defs/action" } },
+        "else": { "type": "array", "items": { "$ref": "#/$defs/action" } }
+      }
+    },
+    "action_script": {
+      "type": "object", "additionalProperties": false, "required": ["type", "source"],
+      "properties": {
+        "type": { "const": "script" },
+        "source": { "type": "string", "description": "Inline JS run in the sandbox with access to app scope." }
+      }
+    },
+
+    "action_moveTo": {
+      "type": "object", "additionalProperties": false, "required": ["type", "x", "y"],
+      "description": "Move to an absolute design-space position. target omitted = the element that owns this event.",
+      "properties": {
+        "type": { "const": "moveTo" },
+        "target": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "animateMs": { "type": "integer", "minimum": 0, "default": 0 }
+      }
+    },
+    "action_moveBy": {
+      "type": "object", "additionalProperties": false, "required": ["type", "dx", "dy"],
+      "properties": {
+        "type": { "const": "moveBy" },
+        "target": { "type": "string" },
+        "dx": { "type": "number" },
+        "dy": { "type": "number" },
+        "animateMs": { "type": "integer", "minimum": 0, "default": 0 }
+      }
+    },
+    "action_resizeToFactor": {
+      "type": "object", "additionalProperties": false, "required": ["type", "factor"],
+      "description": "factor is relative to the element's ORIGINAL authored size (1 = 100%).",
+      "properties": {
+        "type": { "const": "resizeToFactor" },
+        "target": { "type": "string" },
+        "factor": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "action_resizeByFactor": {
+      "type": "object", "additionalProperties": false, "required": ["type", "factor"],
+      "description": "factor is relative to the element's CURRENT size.",
+      "properties": {
+        "type": { "const": "resizeByFactor" },
+        "target": { "type": "string" },
+        "factor": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "action_setSize": {
+      "type": "object", "additionalProperties": false, "required": ["type", "width", "height"],
+      "properties": {
+        "type": { "const": "setSize" },
+        "target": { "type": "string" },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 }
+      }
+    },
+    "action_rotateTo": {
+      "type": "object", "additionalProperties": false, "required": ["type", "angle"],
+      "properties": {
+        "type": { "const": "rotateTo" },
+        "target": { "type": "string" },
+        "angle": { "type": "number" }
+      }
+    },
+    "action_rotateBy": {
+      "type": "object", "additionalProperties": false, "required": ["type", "angleOffset"],
+      "properties": {
+        "type": { "const": "rotateBy" },
+        "target": { "type": "string" },
+        "angleOffset": { "type": "number" }
+      }
+    },
+    "action_bringToFront": {
+      "type": "object", "additionalProperties": false, "required": ["type"],
+      "properties": { "type": { "const": "bringToFront" }, "target": { "type": "string" } }
+    },
+    "action_sendToBack": {
+      "type": "object", "additionalProperties": false, "required": ["type"],
+      "properties": { "type": { "const": "sendToBack" }, "target": { "type": "string" } }
+    },
+    "action_setOpacity": {
+      "type": "object", "additionalProperties": false, "required": ["type", "opacity"],
+      "properties": {
+        "type": { "const": "setOpacity" },
+        "target": { "type": "string" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "action_applyEffects": {
+      "type": "object", "additionalProperties": false, "required": ["type"],
+      "description": "Partial update — only the parameters present are changed; the rest keep their current value.",
+      "properties": {
+        "type": { "const": "applyEffects" },
+        "target": { "type": "string" },
+        "blur": { "type": "number", "minimum": 0, "maximum": 100 },
+        "grayscale": { "type": "number", "minimum": 0, "maximum": 100 },
+        "sepia": { "type": "number", "minimum": 0, "maximum": 100 },
+        "hueRotation": { "type": "number" },
+        "brightness": { "type": "number", "minimum": 0 }
+      }
+    },
+    "action_containerState": {
+      "type": "object", "additionalProperties": false, "required": ["type", "op"],
+      "description": "Requires the target element's container.mode to be 'free' or 'pinnable'.",
+      "properties": {
+        "type": { "const": "containerState" },
+        "target": { "type": "string" },
+        "op": { "enum": ["maximize", "minimize", "normal", "toggleMaximize", "toggleMinimize"] }
+      }
+    },
+    "action_setInteractivity": {
+      "type": "object", "additionalProperties": false, "required": ["type", "to"],
+      "description": "Static-only: controls whether this element captures touches or lets them pass through to whatever is beneath it.",
+      "properties": {
+        "type": { "const": "setInteractivity" },
+        "target": { "type": "string" },
+        "to": { "enum": ["visible", "hidden", "toggle"] }
+      }
+    },
+    "action_showAtLocation": {
+      "type": "object", "additionalProperties": false, "required": ["type", "x", "y"],
+      "properties": {
+        "type": { "const": "showAtLocation" },
+        "target": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "hideEverythingElse": { "type": "boolean", "default": false }
+      }
+    },
+    "action_scrollToIndex": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target", "index"],
+      "description": "target must be a container with props.arrange 'grid' or 'carousel'. For grid this scrolls the item into view; for carousel it pages directly to that index.",
+      "properties": {
+        "type": { "const": "collection.scrollToIndex" },
+        "target": { "type": "string" },
+        "index": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "action_collectionNext": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target"],
+      "properties": { "type": { "const": "collection.next" }, "target": { "type": "string" } }
+    },
+    "action_collectionPrevious": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target"],
+      "properties": { "type": { "const": "collection.previous" }, "target": { "type": "string" } }
+    },
+    "action_remoteSend": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target", "do"],
+      "description": "Sends an action list to another running Player instance (a remoteEndpoint) over the network. The remote Player executes `do` against ITS OWN document — the sender doesn't need to know the remote document's structure, only which of the remote's own element/screen ids it's addressing.",
+      "properties": {
+        "type": { "const": "remote.send" },
+        "target": { "type": "string", "description": "remoteEndpoint id." },
+        "do": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/action" }, "description": "Actions the REMOTE Player will run against its own document." }
+      }
+    },
+    "action_panMap": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target", "dx", "dy"],
+      "description": "target must be a container with props.arrange 'map'. dx/dy are in the container's own pixel space.",
+      "properties": {
+        "type": { "const": "collection.panMap" },
+        "target": { "type": "string" },
+        "dx": { "type": "number" },
+        "dy": { "type": "number" }
+      }
+    },
+    "action_zoomMap": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target", "factor"],
+      "description": "Multiplies the map's current zoom by `factor`, clamped to the container's mapMinZoom/mapMaxZoom.",
+      "properties": {
+        "type": { "const": "collection.zoomMap" },
+        "target": { "type": "string" },
+        "factor": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "action_scrollToDate": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target", "date"],
+      "description": "target must be a container with props.arrange 'timeline'. Recenters the visible window on the given date.",
+      "properties": {
+        "type": { "const": "collection.scrollToDate" },
+        "target": { "type": "string" },
+        "date": { "type": "string", "description": "ISO date string." }
+      }
+    },
+    "action_pauseSlideshow": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target"],
+      "properties": { "type": { "const": "collection.pauseSlideshow" }, "target": { "type": "string" } }
+    },
+    "action_resumeSlideshow": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target"],
+      "properties": { "type": { "const": "collection.resumeSlideshow" }, "target": { "type": "string" } }
+    }
+  }
+}

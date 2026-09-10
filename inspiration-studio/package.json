@@ -1,0 +1,51 @@
+{
+  "name": "inspiration-studio",
+  "productName": "Inspiration Studio",
+  "version": "0.1.0",
+  "description": "Composer-style desktop authoring tool for .isx projects (Inspiration Technologies)",
+  "author": "Inspiration Technologies",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && tsc -p electron/tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "electron:dev": "npm run build && electron .",
+    "electron:build": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "electron": "33.2.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  },
+  "build": {
+    "appId": "com.inspirationtech.studio",
+    "productName": "Inspiration Studio",
+    "files": ["dist/**", "dist-electron/**"],
+    "directories": { "output": "release" },
+    "win": {
+      "target": ["nsis"],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "InspirationStudio-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": ["dir"],
+      "category": "public.app-category.developer-tools"
+    }
+  }
+}
